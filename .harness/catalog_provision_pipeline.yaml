@@ -4,11 +4,6 @@ pipeline:
   projectIdentifier: mak_playground
   orgIdentifier: playground
   tags: {}
-  properties:
-    ci:
-      codebase:
-        connectorRef: MyGitHubConnector
-        build: <+input>
   stages:
     - stage:
         name: IDP Catalog Automation Stage
@@ -103,16 +98,8 @@ pipeline:
                       git add catalog-info.yaml
                       git commit -m "chore: automated idp catalog provisioning structure"
 
-                      # ⚙️ FIXED: Bakes identical credential conditional logic for the push stage container context
-                      cat << 'EOF' > ../git-askpass.sh
-                      #!/bin/sh
-                      case "$1" in
-                        *Username*|*username*) echo "mastermak-avyka" ;;
-                        *) echo '<+secrets.getValue("project.Git-PATS-MAK")>' ;;
-                      esac
-                      EOF
-                      chmod +x ../git-askpass.sh
-                      export GIT_ASKPASS="$(pwd)/../git-askpass.sh"
+                      # ✅ FIXED: Embed PAT directly in the remote URL - GitHub requires token auth
+                      git remote set-url origin https://mastermak-avyka:<+secrets.getValue("project.Git-PATS-MAK")>@github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git
 
                       git push origin <+pipeline.variables.REPO_BRANCH>
               - step:
