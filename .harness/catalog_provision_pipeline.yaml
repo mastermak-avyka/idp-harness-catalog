@@ -4,11 +4,6 @@ pipeline:
   projectIdentifier: mak_playground
   orgIdentifier: playground
   tags: {}
-  properties:
-    ci:
-      codebase:
-        connectorRef: MyGitHubConnector
-        build: <+input>
   stages:
     - stage:
         name: IDP Catalog Automation Stage
