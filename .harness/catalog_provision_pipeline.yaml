@@ -8,9 +8,9 @@ pipeline:
     - stage:
         name: IDP Catalog Automation Stage
         identifier: IDP_Catalog_Automation_Stage
-        type: CI
+        description: Automated end-to-end software component catalog entry provisioning stage via native IDP plugins.
+        type: IDP
         spec:
-          cloneCodebase: false
           platform:
             os: Linux
             arch: Amd64
@@ -20,15 +20,23 @@ pipeline:
           execution:
             steps:
               - step:
-                  type: Run
+                  type: GitClone
+                  name: Git Clone Repository
+                  identifier: git_clone
+                  spec:
+                    repoName: <+pipeline.variables.REPO_NAME>
+                    build:
+                      type: branch
+                      spec:
+                        branch: <+pipeline.variables.REPO_BRANCH>
+              - step:
+                  type: CreateCatalog
                   name: Create Catalog Entry
                   identifier: Create_Catalog_Entry
                   spec:
-                    connectorRef: account.harnessImage
-                    image: alpine:latest
-                    shell: Sh
-                    command: |-
-                      cat <<EOF > catalog-info.yaml
+                    fileName: catalog-info.yaml
+                    filePath: <+pipeline.variables.REPO_NAME>
+                    fileContent: |-
                       apiVersion: harness.io/v1
                       kind: Component
                       type: service
@@ -45,145 +53,38 @@ pipeline:
                           - idp-provisioned
                         annotations:
                           backstage.io/v1alpha1/launch-template: template:default/provision-new-catalog
-                      EOF
-                      echo "Successfully generated local catalog-info.yaml"
               - step:
-                  type: Run
-                  name: Create Branch Path
-                  identifier: Create_Branch_Path
-                  spec:
-                    connectorRef: account.harnessImage
-                    image: alpine/git:latest
-                    shell: Sh
-                    command: |-
-                      # ⚙️ FIXED: Bakes your credentials directly into the script as a literal string
-                      cat << 'EOF' > git-askpass.sh
-                      #!/bin/sh
-                      case "$1" in
-                        *Username*|*username*) echo "mastermak-avyka" ;;
-                        *) echo '<+secrets.getValue("project.Git-PATS-MAK")>' ;;
-                      esac
-                      EOF
-                      chmod +x git-askpass.sh
-                      export GIT_ASKPASS="$(pwd)/git-askpass.sh"
-
-                      git clone "https://github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git" target-repo
-                      cd target-repo
-
-                      git config --global user.email "attaullah.n.khan@avyka.com"
-                      git config --global user.name "mastermak-avyka"
-
-                      if git ls-remote --heads origin <+pipeline.variables.REPO_BRANCH> | grep -q <+pipeline.variables.REPO_BRANCH>; then
-                          echo "Branch exists. Checking out..."
-                          git checkout <+pipeline.variables.REPO_BRANCH>
-                      else
-                          echo "Branch does not exist. Cutting fresh..."
-                          git checkout -b <+pipeline.variables.REPO_BRANCH>
-                      fi
-              - step:
-                  type: Run
+                  type: DirectPush
                   name: Direct Push File
                   identifier: Direct_Push_File
                   spec:
-                    connectorRef: account.harnessImage
-                    image: alpine/git:latest
-                    shell: Sh
-                    command: |-
-                      cp catalog-info.yaml target-repo/
-                      cd target-repo
-
-                      git config user.email "attaullah.n.khan@avyka.com"
-                      git config user.name "mastermak-avyka"
-
-                      git add catalog-info.yaml
-                      git commit -m "chore: automated idp catalog provisioning structure"
-
-                      # 🧰 Step 1: Install jq inside the alpine container to handle the encoding
-                      apk add --no-cache jq
-
-                      # 🔒 Step 2: Shield the raw token safely in single quotes
-                      export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
-
-                      # ⚙️ Step 3: URL-encode the token so special characters don't break libcurl
-                      ENCODED_TOKEN=$(echo -n "$GITHUB_TOKEN" | jq -srr '@uri')
-
-                      # 🔗 Step 4: Safely expand the encoded token into the remote configuration URL
-                      git remote set-url origin "https://mastermak-avyka:${ENCODED_TOKEN}@github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git"
-
-                      # 🚀 Step 5: Push cleanly to your target branch
-                      git push origin <+pipeline.variables.REPO_BRANCH>
+                    forcePush: true
+                    organization: playground
+                    project: mak_playground
+                    repository: <+pipeline.variables.REPO_NAME>
+                    codeDirectory: <+pipeline.variables.REPO_NAME>
+                    branch: <+pipeline.variables.REPO_BRANCH>
+                    harnessCodeRepoType: project
               - step:
-                  type: Run
-                  name: Generate Pull Request
-                  identifier: Generate_Pull_Request
-                  spec:
-                    connectorRef: account.harnessImage
-                    image: alpine:latest
-                    shell: Sh
-                    command: |-
-                      apk add --no-cache curl jq
-                      PR_RESPONSE=$(curl -s -X POST \
-                        -H 'Authorization: Bearer <+secrets.getValue("project.Git-PATS-MAK")>' \
-                        -H "Accept: application/vnd.github+json" \
-                        https://api.github.com/repos/mastermak-avyka/<+pipeline.variables.REPO_NAME>/pulls \
-                        -d '{"title":"IDP Provisioning Request: <+pipeline.variables.APP_NAME>","head":"<+pipeline.variables.REPO_BRANCH>","base":"main","body":"Automated compliance file submission."}')
-
-                      PR_NUMBER=$(echo $PR_RESPONSE | jq '.number')
-                      echo "SUCCESS: Opened active Pull Request #$PR_NUMBER"
-                      echo $PR_NUMBER > pr_tracking.txt
-              - step:
-                  type: Run
+                  type: RegisterCatalog
                   name: Register Catalog In IDP
                   identifier: Register_Catalog_In_IDP
                   spec:
-                    connectorRef: account.harnessImage
-                    image: alpine:latest
-                    shell: Sh
-                    command: |-
-                      apk add --no-cache curl
-                      PR_NUM=$(cat pr_tracking.txt)
-                      echo "Tracking status loop for Pull Request #$PR_NUM"
-
-                      FORKS_WAIT=0
-                      IS_MERGED="false"
-                      while [ $FORKS_WAIT -lt 18 ]; do
-                        MERGE_CHECK=$(curl -s -o /dev/null -w "%{http_code}" \
-                          -H 'Authorization: Bearer <+secrets.getValue("project.Git-PATS-MAK")>' \
-                          https://api.github.com/repos/mastermak-avyka/<+pipeline.variables.REPO_NAME>/pulls/$PR_NUM/merged)
-                        
-                        if [ "$MERGE_CHECK" = "204" ]; then
-                          echo "Detected successful PR merge action!"
-                          IS_MERGED="true"
-                          break
-                        fi
-                        echo "PR open. Waiting for merge... (10s check interval)"
-                        sleep 10
-                        FORKS_WAIT=$((FORKS_WAIT+1))
-                      done
-
-                      if [ "$IS_MERGED" = "true" ]; then
-                        curl -X POST \
-                          -H 'X-API-Key: <+secrets.getValue("project.mak_harness_api_token")>' \
-                          -H "Content-Type: application/json" \
-                          https://app.harness.io/idp/api/catalog/locations \
-                          -d '{"type":"url","target":"https://github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>/blob/main/catalog-info.yaml"}'
-                      else
-                        echo "SKIPPED: PR not merged."
-                        exit 0
-                      fi
+                    organization: playground
+                    project: mak_playground
+                    repository: <+pipeline.variables.REPO_NAME>
+                    filePath: catalog-info.yaml
+                    branch: <+pipeline.variables.REPO_BRANCH>
+                    harnessCodeRepoType: project
               - step:
-                  type: Run
+                  type: SlackNotify
                   name: Slack Registration Notify
                   identifier: Slack_Registration_Notify
                   spec:
-                    connectorRef: account.harnessImage
-                    image: alpine:latest
-                    shell: Sh
-                    command: |-
-                      apk add --no-cache curl
-                      curl -X POST -H 'Content-type: application/json' \
-                        --data '{"text":"✅ *Harness IDP Provisioning Update:* The application catalog entry for *<+pipeline.variables.APP_NAME>* has passed all automated staging validation loops and is now live inside the Software Component Directory."}' \
-                        '<+secrets.getValue("project.slack_webhook_url")>'
+                    channel: <+secrets.getValue("project.idp_slack_channel_id")>
+                    messageContent: "✅ *Harness IDP Provisioning Update:* The application catalog entry for *<+pipeline.variables.APP_NAME>* has passed all automated staging validation loops and is now live inside the Software Component Directory. Track run history: <+pipeline.executionUrl>"
+                    token: idp_slack_token
+          cloneCodebase: false
   variables:
     - name: APP_NAME
       type: String
