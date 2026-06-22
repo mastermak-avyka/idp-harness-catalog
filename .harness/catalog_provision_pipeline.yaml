@@ -1,0 +1,213 @@
+pipeline:
+  name: Catalog Provision Pipeline
+  identifier: Catalog_Provision_Pipeline
+  projectIdentifier: mak_playground
+  orgIdentifier: playground
+  tags: {}
+  stages:
+    - stage:
+        name: IDP Catalog Automation Stage
+        identifier: IDP_Catalog_Automation_Stage
+        description: ""
+        type: Custom
+        spec:
+          execution:
+            steps:
+              - step:
+                  type: ShellScript
+                  name: Create Catalog Entry
+                  identifier: Create_Catalog_Entry
+                  spec:
+                    shell: Bash
+                    executionTarget: {}
+                    source:
+                      type: Inline
+                      spec:
+                        script: |-
+                          cat <<EOF > catalog-info.yaml
+                          apiVersion: harness.io/v1
+                          kind: Component
+                          type: service
+                          identifier: <+pipeline.variables.APP_NAME>
+                          name: <+pipeline.variables.APP_NAME>
+                          owner: _account_all_users
+                          orgIdentifier: playground
+                          projectIdentifier: mak_playground
+                          spec:
+                            lifecycle: dev
+                          metadata:
+                            description: "<+pipeline.variables.APP_DESCRIPTION>"
+                            tags:
+                              - idp-provisioned
+                            annotations:
+                              # Part 4: Direct Launch Backlink Linkage mapping
+                              backstage.io/v1alpha1/launch-template: template:default/provision-new-catalog
+                          EOF
+                          echo "Successfully generated local catalog-info.yaml layout file"
+                    environmentVariables: []
+                    outputVariables: []
+                  timeout: 10m
+              - step:
+                  type: ShellScript
+                  name: Create Branch Path
+                  identifier: Create_Branch_Path
+                  spec:
+                    shell: Bash
+                    executionTarget: {}
+                    source:
+                      type: Inline
+                      spec:
+                        script: |-
+                          # Clone down using the token mounted inside your verified project secret store
+                          git clone https://<+secrets.getValue("project.Git-PATS-MAK")>@github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git target-repo
+                          cd target-repo
+
+                          git config --global user.email "idp-engine@harness.io"
+                          git config --global user.name "Harness Automation"
+
+                          # Safe execution: check if branch exists; if not, cut it cleanly
+                          if git ls-remote --heads origin <+pipeline.variables.REPO_BRANCH> | grep -q <+pipeline.variables.REPO_BRANCH>; then
+                              echo "Tracking branch already exists on remote origin. Checking out..."
+                              git checkout <+pipeline.variables.REPO_BRANCH>
+                          else
+                              echo "Tracking branch does not exist. Cutting a fresh branch..."
+                              git checkout -b <+pipeline.variables.REPO_BRANCH>
+                          fi
+                    environmentVariables: []
+                    outputVariables: []
+                  timeout: 10m
+              - step:
+                  type: ShellScript
+                  name: Direct Push File
+                  identifier: Direct_Push_File
+                  spec:
+                    shell: Bash
+                    executionTarget: {}
+                    source:
+                      type: Inline
+                      spec:
+                        script: |-
+                          cd target-repo
+                          # Copy file to the root directory path
+                          cp ../catalog-info.yaml .
+                          git add catalog-info.yaml
+                          git commit -m "chore: automated idp catalog provisioning structure"
+                          git push origin <+pipeline.variables.REPO_BRANCH>
+                    environmentVariables: []
+                    outputVariables: []
+                  timeout: 10m
+              - step:
+                  type: ShellScript
+                  name: Generate Pull Request
+                  identifier: Generate_Pull_Request
+                  spec:
+                    shell: Bash
+                    executionTarget: {}
+                    source:
+                      type: Inline
+                      spec:
+                        script: |-
+                          # Execute curl targeting native GitHub endpoints to request a merge into main branch
+                          PR_RESPONSE=$(curl -s -X POST \
+                            -H "Authorization: Bearer <+secrets.getValue("project.Git-PATS-MAK")>" \
+                            -H "Accept: application/vnd.github+json" \
+                            https://api.github.com/repos/mastermak-avyka/<+pipeline.variables.REPO_NAME>/pulls \
+                            -d '{"title":"IDP Provisioning Request: <+pipeline.variables.APP_NAME>","head":"<+pipeline.variables.REPO_BRANCH>","base":"main","body":"Automated compliance file submission generated via Harness IDP Self-Service Template."}')
+
+                          # Parse output using jq tool
+                          PR_NUMBER=$(echo $PR_RESPONSE | jq '.number')
+                          echo "SUCCESS: Opened active Pull Request #$PR_NUMBER"
+
+                          # Save the PR Number value as an environmental variable block for our next step to reference
+                          echo $PR_NUMBER > ../pr_tracking.txt
+                    environmentVariables: []
+                    outputVariables: []
+                  timeout: 10m
+              - step:
+                  type: ShellScript
+                  name: Register Catalog In IDP
+                  identifier: Register_Catalog_In_IDP
+                  spec:
+                    shell: Bash
+                    executionTarget: {}
+                    source:
+                      type: Inline
+                      spec:
+                        script: |-
+                          PR_NUM=$(cat pr_tracking.txt)
+                          echo "Tracking status loop for Pull Request #$PR_NUM"
+
+                          # Loop check: Poll GitHub API for 3 minutes to confirm when user clicks Merge button
+                          FORKS_WAIT=0
+                          IS_MERGED="false"
+
+                          while [ $FORKS_WAIT -lt 18 ]; do
+                            MERGE_CHECK=$(curl -s -o /dev/null -w "%{http_code}" \
+                              -H "Authorization: Bearer <+secrets.getValue("project.Git-PATS-MAK")>" \
+                              https://api.github.com/repos/mastermak-avyka/<+pipeline.variables.REPO_NAME>/pulls/$PR_NUM/merged)
+                            
+                            if [ "$MERGE_CHECK" == "204" ]; then
+                              echo "Detected successful PR merge action!"
+                              IS_MERGED="true"
+                              break
+                            fi
+                            
+                            echo "PR status is currently open. Waiting for merge... (10s check interval)"
+                            sleep 10
+                            FORKS_WAIT=$((FORKS_WAIT+1))
+                          done
+
+                          if [ "$IS_MERGED" == "true" ]; then
+                            echo "Executing raw URL registration entry injection into Harness IDP DB Catalog..."
+                            curl -X POST \
+                              -H "X-API-Key: <+secrets.getValue("project.mak_harness_api_token")>" \
+                              -H "Content-Type: application/json" \
+                              https://app.harness.io/idp/api/catalog/locations \
+                              -d '{"type":"url","target":"https://github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>/blob/main/catalog-info.yaml"}'
+                          else
+                            echo "SKIPPED: PR was not merged within the validation window constraint. Skipping catalog registration step."
+                            exit 0
+                          fi
+                    environmentVariables: []
+                    outputVariables: []
+                  timeout: 10m
+              - step:
+                  type: ShellScript
+                  name: Slack Registration Notify
+                  identifier: Slack_Registration_Notify
+                  spec:
+                    shell: Bash
+                    executionTarget: {}
+                    source:
+                      type: Inline
+                      spec:
+                        script: |-
+                          # Execute simple Slack webhook update out to your workspace operations channel
+                          curl -X POST -H 'Content-type: application/json' \
+                            --data '{"text":"✅ *Harness IDP Provisioning Update:* The application catalog entry for *<+pipeline.variables.APP_NAME>* has passed all automated staging validation loops and is now live inside the Software Component Directory."}' \
+                            <+secrets.getValue("project.slack_webhook_url")>
+                    environmentVariables: []
+                    outputVariables: []
+                  timeout: 10m
+        tags: {}
+  variables:
+    - name: APP_NAME
+      type: String
+      description: ""
+      required: false
+      value: <+input>
+    - name: APP_DESCRIPTION
+      type: String
+      description: ""
+      required: false
+      value: <+input>
+    - name: REPO_NAME
+      type: String
+      description: ""
+      required: false
+      value: <+input>
+    - name: REPO_BRANCH
+      type: String
+      description: ""
+      required: false
+      value: <+input>
