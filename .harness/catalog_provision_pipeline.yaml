@@ -189,6 +189,11 @@ pipeline:
                     environmentVariables: []
                     outputVariables: []
                   timeout: 10m
+          environment:
+            environmentRef: deploydev
+            deployToAll: false
+            infrastructureDefinitions:
+              - identifier: devinfra
         tags: {}
   variables:
     - name: APP_NAME
