@@ -61,9 +61,11 @@ pipeline:
                     image: alpine/git:latest
                     shell: Sh
                     command: |-
+                      # 🔒 Export token to environment variable
                       export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
-                      echo "machine github.com login mastermak-avyka password $GITHUB_TOKEN" > ~/.netrc
-                      chmod 600 ~/.netrc
+
+                      # ⚙️ Configure global credential helper to feed credentials automatically to clone
+                      git config --global credential.helper '!f() { echo "username=mastermak-avyka"; echo "password=$GITHUB_TOKEN"; }; f'
 
                       git clone https://github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git target-repo
                       cd target-repo
@@ -87,14 +89,15 @@ pipeline:
                     image: alpine/git:latest
                     shell: Sh
                     command: |-
-                      export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
-                      echo "machine github.com login mastermak-avyka password $GITHUB_TOKEN" > ~/.netrc
-                      chmod 600 ~/.netrc
-
                       cp catalog-info.yaml target-repo/
                       cd target-repo
 
-                      # 👈 FIXED: Re-declaring identity locally inside this specific step's container context
+                      # 🔒 Export token to environment variable
+                      export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
+
+                      # ⚙️ FIXED: Configure local repo credential helper to securely authorize the push action
+                      git config credential.helper '!f() { echo "username=mastermak-avyka"; echo "password=$GITHUB_TOKEN"; }; f'
+
                       git config user.email "attaullah.n.khan@avyka.com"
                       git config user.name "mastermak-avyka"
 
