@@ -4,6 +4,11 @@ pipeline:
   projectIdentifier: mak_playground
   orgIdentifier: playground
   tags: {}
+  properties:
+    ci:
+      codebase:
+        connectorRef: MyGitHubConnector
+        build: <+input>
   stages:
     - stage:
         name: IDP Catalog Automation Stage
@@ -56,12 +61,10 @@ pipeline:
                     image: alpine/git:latest
                     shell: Sh
                     command: |-
-                      # 🔒 FIXED: Securely write the token to the native .netrc file
                       export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
                       echo "machine github.com login mastermak-avyka password $GITHUB_TOKEN" > ~/.netrc
                       chmod 600 ~/.netrc
 
-                      # Pristine clean URL definition
                       git clone https://github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git target-repo
                       cd target-repo
 
@@ -84,13 +87,17 @@ pipeline:
                     image: alpine/git:latest
                     shell: Sh
                     command: |-
-                      # 🔒 FIXED: Write token to .netrc to authenticate the push action
                       export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
                       echo "machine github.com login mastermak-avyka password $GITHUB_TOKEN" > ~/.netrc
                       chmod 600 ~/.netrc
 
                       cp catalog-info.yaml target-repo/
                       cd target-repo
+
+                      # 👈 FIXED: Re-declaring identity locally inside this specific step's container context
+                      git config user.email "attaullah.n.khan@avyka.com"
+                      git config user.name "mastermak-avyka"
+
                       git add catalog-info.yaml
                       git commit -m "chore: automated idp catalog provisioning structure"
                       git push origin <+pipeline.variables.REPO_BRANCH>
@@ -166,9 +173,6 @@ pipeline:
                       curl -X POST -H 'Content-type: application/json' \
                         --data '{"text":"✅ *Harness IDP Provisioning Update:* The application catalog entry for *<+pipeline.variables.APP_NAME>* has passed all automated staging validation loops and is now live inside the Software Component Directory."}' \
                         '<+secrets.getValue("project.slack_webhook_url")>'
-                  when:
-                    stageStatus: Success
-                    condition: "false"
   variables:
     - name: APP_NAME
       type: String
