@@ -4,11 +4,6 @@ pipeline:
   projectIdentifier: mak_playground
   orgIdentifier: playground
   tags: {}
-  properties:
-    ci:
-      codebase:
-        connectorRef: MyGitHubConnector
-        build: <+input>
   stages:
     - stage:
         name: IDP Catalog Automation Stage
@@ -171,6 +166,9 @@ pipeline:
                       curl -X POST -H 'Content-type: application/json' \
                         --data '{"text":"✅ *Harness IDP Provisioning Update:* The application catalog entry for *<+pipeline.variables.APP_NAME>* has passed all automated staging validation loops and is now live inside the Software Component Directory."}' \
                         '<+secrets.getValue("project.slack_webhook_url")>'
+                  when:
+                    stageStatus: Success
+                    condition: "false"
   variables:
     - name: APP_NAME
       type: String
