@@ -61,9 +61,12 @@ pipeline:
                     image: alpine/git:latest
                     shell: Sh
                     command: |-
+                      # 🔒 FIXED: Securely write the token to the native .netrc file
                       export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
-                      git config --global http.extraHeader "Authorization: Bearer $GITHUB_TOKEN"
+                      echo "machine github.com login mastermak-avyka password $GITHUB_TOKEN" > ~/.netrc
+                      chmod 600 ~/.netrc
 
+                      # Pristine clean URL definition
                       git clone https://github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git target-repo
                       cd target-repo
 
@@ -86,8 +89,10 @@ pipeline:
                     image: alpine/git:latest
                     shell: Sh
                     command: |-
+                      # 🔒 FIXED: Write token to .netrc to authenticate the push action
                       export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
-                      git config --global http.extraHeader "Authorization: Bearer $GITHUB_TOKEN"
+                      echo "machine github.com login mastermak-avyka password $GITHUB_TOKEN" > ~/.netrc
+                      chmod 600 ~/.netrc
 
                       cp catalog-info.yaml target-repo/
                       cd target-repo
