@@ -61,12 +61,13 @@ pipeline:
                     image: alpine/git:latest
                     shell: Sh
                     command: |-
-                      # 🔒 Convert token to a safe Base64 header to bypass special character URL bugs
+                      # 🔒 Protect token using single quotes
                       export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
-                      AUTH_B64=$(printf "mastermak-avyka:%s" "$GITHUB_TOKEN" | base64 | tr -d '\n')
-                      git config --global http.extraHeader "Authorization: Basic $AUTH_B64"
 
-                      # Pristine clean URL tracking path
+                      # ⚙️ FIXED: Rewrite the GitHub URL pattern seamlessly in Git's memory configuration
+                      git config --global url."https://mastermak-avyka:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+                      # Clean URL with absolutely zero tokens or single quotes inside it
                       git clone https://github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git target-repo
                       cd target-repo
 
@@ -92,17 +93,18 @@ pipeline:
                       cp catalog-info.yaml target-repo/
                       cd target-repo
 
+                      # ⚙️ Configure your local Git container tracking profile parameters
                       git config user.email "attaullah.n.khan@avyka.com"
                       git config user.name "mastermak-avyka"
 
                       git add catalog-info.yaml
                       git commit -m "chore: automated idp catalog provisioning structure"
 
-                      # 🔒 FIXED: Apply the exact same safe Base64 header context locally for pushing code cleanly
+                      # 🔒 Protect token inside environment variable block
                       export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
-                      AUTH_B64=$(printf "mastermak-avyka:%s" "$GITHUB_TOKEN" | base64 | tr -d '\n')
-                      git config http.extraHeader "Authorization: Basic $AUTH_B64"
 
+                      # ⚙️ FIXED: Apply the exact same URL rewrite configuration rule to authorize the push action
+                      git config --global url."https://mastermak-avyka:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
                       git push origin <+pipeline.variables.REPO_BRANCH>
               - step:
                   type: Run
