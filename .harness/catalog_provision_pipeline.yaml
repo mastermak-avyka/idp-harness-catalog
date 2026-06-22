@@ -61,16 +61,18 @@ pipeline:
                     image: alpine/git:latest
                     shell: Sh
                     command: |-
-                      # 🔒 Mask the token safely inside single quotes
-                      export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
-
-                      # ⚙️ Build a temporary non-interactive password helper script
-                      echo 'echo "$GITHUB_TOKEN"' > git-askpass.sh
+                      # ⚙️ FIXED: Bakes your credentials directly into the script as a literal string
+                      cat << 'EOF' > git-askpass.sh
+                      #!/bin/sh
+                      case "$1" in
+                        *Username*|*username*) echo "mastermak-avyka" ;;
+                        *) echo '<+secrets.getValue("project.Git-PATS-MAK")>' ;;
+                      esac
+                      EOF
                       chmod +x git-askpass.sh
                       export GIT_ASKPASS="$(pwd)/git-askpass.sh"
 
-                      # 🔗 Pristine clean URL structure containing ONLY your username string
-                      git clone "https://mastermak-avyka@github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git" target-repo
+                      git clone "https://github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git" target-repo
                       cd target-repo
 
                       git config --global user.email "attaullah.n.khan@avyka.com"
@@ -101,9 +103,14 @@ pipeline:
                       git add catalog-info.yaml
                       git commit -m "chore: automated idp catalog provisioning structure"
 
-                      # 🔒 Mount the identical password helper hook locally to authorize the push stage
-                      export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
-                      echo 'echo "$GITHUB_TOKEN"' > ../git-askpass.sh
+                      # ⚙️ FIXED: Bakes identical credential conditional logic for the push stage container context
+                      cat << 'EOF' > ../git-askpass.sh
+                      #!/bin/sh
+                      case "$1" in
+                        *Username*|*username*) echo "mastermak-avyka" ;;
+                        *) echo '<+secrets.getValue("project.Git-PATS-MAK")>' ;;
+                      esac
+                      EOF
                       chmod +x ../git-askpass.sh
                       export GIT_ASKPASS="$(pwd)/../git-askpass.sh"
 
