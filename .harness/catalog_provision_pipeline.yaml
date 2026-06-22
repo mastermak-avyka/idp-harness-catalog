@@ -89,8 +89,6 @@ pipeline:
                     image: alpine/git:latest
                     shell: Sh
                     command: |-
-                      apk add --no-cache bash
-
                       cp catalog-info.yaml target-repo/
                       cd target-repo
 
@@ -100,8 +98,13 @@ pipeline:
                       git add catalog-info.yaml
                       git commit -m "chore: automated idp catalog provisioning structure"
 
-                      git remote set-url origin https://mastermak-avyka:<+secrets.getValue("project.Git-PATS-MAK")>@github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git
+                      # 🔒 Step 1: Shield the token in single quotes so the shell never parses it as code
+                      export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
 
+                      # ⚙️ Step 2: Use double quotes to safely expand the variable into the remote URL configuration
+                      git remote set-url origin "https://mastermak-avyka:${GITHUB_TOKEN}@github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git"
+
+                      # 🚀 Step 3: Push cleanly to your target branch
                       git push origin <+pipeline.variables.REPO_BRANCH>
               - step:
                   type: Run
