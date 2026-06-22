@@ -61,13 +61,11 @@ pipeline:
                     image: alpine/git:latest
                     shell: Sh
                     command: |-
-                      # 🔒 Export token to environment variable
+                      # 🔒 Shield token using single quotes
                       export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
 
-                      # ⚙️ Configure global credential helper to feed credentials automatically to clone
-                      git config --global credential.helper '!f() { echo "username=mastermak-avyka"; echo "password=$GITHUB_TOKEN"; }; f'
-
-                      git clone https://github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git target-repo
+                      # 🔗 Clean, dynamic expansion clone path
+                      git clone "https://mastermak-avyka:${GITHUB_TOKEN}@github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git" target-repo
                       cd target-repo
 
                       git config --global user.email "attaullah.n.khan@avyka.com"
@@ -92,17 +90,17 @@ pipeline:
                       cp catalog-info.yaml target-repo/
                       cd target-repo
 
-                      # 🔒 Export token to environment variable
-                      export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
-
-                      # ⚙️ FIXED: Configure local repo credential helper to securely authorize the push action
-                      git config credential.helper '!f() { echo "username=mastermak-avyka"; echo "password=$GITHUB_TOKEN"; }; f'
-
                       git config user.email "attaullah.n.khan@avyka.com"
                       git config user.name "mastermak-avyka"
 
                       git add catalog-info.yaml
                       git commit -m "chore: automated idp catalog provisioning structure"
+
+                      # 🔒 Shield token using single quotes
+                      export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
+
+                      # ⚙️ FIXED: Rewrite the remote origin configuration dynamically right before pushing code
+                      git remote set-url origin "https://mastermak-avyka:${GITHUB_TOKEN}@github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git"
                       git push origin <+pipeline.variables.REPO_BRANCH>
               - step:
                   type: Run
