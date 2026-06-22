@@ -98,13 +98,19 @@ pipeline:
                       git add catalog-info.yaml
                       git commit -m "chore: automated idp catalog provisioning structure"
 
-                      # 🔒 Step 1: Shield the token in single quotes so the shell never parses it as code
+                      # 🧰 Step 1: Install jq inside the alpine container to handle the encoding
+                      apk add --no-cache jq
+
+                      # 🔒 Step 2: Shield the raw token safely in single quotes
                       export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
 
-                      # ⚙️ Step 2: Use double quotes to safely expand the variable into the remote URL configuration
-                      git remote set-url origin "https://mastermak-avyka:${GITHUB_TOKEN}@github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git"
+                      # ⚙️ Step 3: URL-encode the token so special characters don't break libcurl
+                      ENCODED_TOKEN=$(echo -n "$GITHUB_TOKEN" | jq -srr '@uri')
 
-                      # 🚀 Step 3: Push cleanly to your target branch
+                      # 🔗 Step 4: Safely expand the encoded token into the remote configuration URL
+                      git remote set-url origin "https://mastermak-avyka:${ENCODED_TOKEN}@github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git"
+
+                      # 🚀 Step 5: Push cleanly to your target branch
                       git push origin <+pipeline.variables.REPO_BRANCH>
               - step:
                   type: Run
