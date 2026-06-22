@@ -61,11 +61,13 @@ pipeline:
                     image: alpine/git:latest
                     shell: Sh
                     command: |-
-                      # 🔒 Shield token using single quotes
+                      # 🔒 Convert token to a safe Base64 header to bypass special character URL bugs
                       export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
+                      AUTH_B64=$(printf "mastermak-avyka:%s" "$GITHUB_TOKEN" | base64 | tr -d '\n')
+                      git config --global http.extraHeader "Authorization: Basic $AUTH_B64"
 
-                      # 🔗 Clean, dynamic expansion clone path
-                      git clone "https://mastermak-avyka:${GITHUB_TOKEN}@github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git" target-repo
+                      # Pristine clean URL tracking path
+                      git clone https://github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git target-repo
                       cd target-repo
 
                       git config --global user.email "attaullah.n.khan@avyka.com"
@@ -96,11 +98,11 @@ pipeline:
                       git add catalog-info.yaml
                       git commit -m "chore: automated idp catalog provisioning structure"
 
-                      # 🔒 Shield token using single quotes
+                      # 🔒 FIXED: Apply the exact same safe Base64 header context locally for pushing code cleanly
                       export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
+                      AUTH_B64=$(printf "mastermak-avyka:%s" "$GITHUB_TOKEN" | base64 | tr -d '\n')
+                      git config http.extraHeader "Authorization: Basic $AUTH_B64"
 
-                      # ⚙️ FIXED: Rewrite the remote origin configuration dynamically right before pushing code
-                      git remote set-url origin "https://mastermak-avyka:${GITHUB_TOKEN}@github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git"
                       git push origin <+pipeline.variables.REPO_BRANCH>
               - step:
                   type: Run
