@@ -31,7 +31,7 @@ pipeline:
                   spec:
                     connectorRef: account.harnessImage
                     image: alpine:latest
-                    shell: Bash
+                    shell: Sh
                     command: |-
                       cat <<EOF > catalog-info.yaml
                       apiVersion: harness.io/v1
@@ -59,7 +59,7 @@ pipeline:
                   spec:
                     connectorRef: account.harnessImage
                     image: alpine/git:latest
-                    shell: Bash
+                    shell: Sh
                     command: |-
                       git clone https://<+secrets.getValue("project.Git-PATS-MAK")>@github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git target-repo
                       cd target-repo
@@ -80,7 +80,7 @@ pipeline:
                   spec:
                     connectorRef: account.harnessImage
                     image: alpine/git:latest
-                    shell: Bash
+                    shell: Sh
                     command: |-
                       cp catalog-info.yaml target-repo/
                       cd target-repo
@@ -94,7 +94,7 @@ pipeline:
                   spec:
                     connectorRef: account.harnessImage
                     image: alpine:latest
-                    shell: Bash
+                    shell: Sh
                     command: |-
                       apk add --no-cache curl jq
                       PR_RESPONSE=$(curl -s -X POST \
@@ -113,7 +113,7 @@ pipeline:
                   spec:
                     connectorRef: account.harnessImage
                     image: alpine:latest
-                    shell: Bash
+                    shell: Sh
                     command: |-
                       apk add --no-cache curl
                       PR_NUM=$(cat pr_tracking.txt)
@@ -126,7 +126,7 @@ pipeline:
                           -H "Authorization: Bearer <+secrets.getValue("project.Git-PATS-MAK")>" \
                           https://api.github.com/repos/mastermak-avyka/<+pipeline.variables.REPO_NAME>/pulls/$PR_NUM/merged)
                         
-                        if [ "$MERGE_CHECK" == "204" ]; then
+                        if [ "$MERGE_CHECK" = "204" ]; then # 👈 FIXED: Swapped == to = for POSIX sh stability
                           echo "Detected successful PR merge action!"
                           IS_MERGED="true"
                           break
@@ -136,7 +136,7 @@ pipeline:
                         FORKS_WAIT=$((FORKS_WAIT+1))
                       done
 
-                      if [ "$IS_MERGED" == "true" ]; then
+                      if [ "$IS_MERGED" = "true" ]; then # 👈 FIXED: Swapped == to =
                         curl -X POST \
                           -H "X-API-Key: <+secrets.getValue("project.mak_harness_api_token")>" \
                           -H "Content-Type: application/json" \
@@ -153,7 +153,7 @@ pipeline:
                   spec:
                     connectorRef: account.harnessImage
                     image: alpine:latest
-                    shell: Bash
+                    shell: Sh
                     command: |-
                       apk add --no-cache curl
                       curl -X POST -H 'Content-type: application/json' \
