@@ -61,7 +61,8 @@ pipeline:
                     image: alpine/git:latest
                     shell: Sh
                     command: |-
-                      git clone https://<+secrets.getValue("project.Git-PATS-MAK")>@github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git target-repo
+                      # 👈 FIXED: Wrapped the secret expression in single quotes to protect special characters
+                      git clone https://'<+secrets.getValue("project.Git-PATS-MAK")>'@github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git target-repo
                       cd target-repo
                       git config --global user.email "idp-engine@harness.io"
                       git config --global user.name "Harness Automation"
@@ -97,8 +98,9 @@ pipeline:
                     shell: Sh
                     command: |-
                       apk add --no-cache curl jq
+                      # 👈 FIXED: Changed the authorization header wrapper to single quotes
                       PR_RESPONSE=$(curl -s -X POST \
-                        -H "Authorization: Bearer <+secrets.getValue("project.Git-PATS-MAK")>" \
+                        -H 'Authorization: Bearer <+secrets.getValue("project.Git-PATS-MAK")>' \
                         -H "Accept: application/vnd.github+json" \
                         https://api.github.com/repos/mastermak-avyka/<+pipeline.variables.REPO_NAME>/pulls \
                         -d '{"title":"IDP Provisioning Request: <+pipeline.variables.APP_NAME>","head":"<+pipeline.variables.REPO_BRANCH>","base":"main","body":"Automated compliance file submission."}')
@@ -122,11 +124,12 @@ pipeline:
                       FORKS_WAIT=0
                       IS_MERGED="false"
                       while [ $FORKS_WAIT -lt 18 ]; do
+                        # 👈 FIXED: Secured tracking check credentials with single quotes
                         MERGE_CHECK=$(curl -s -o /dev/null -w "%{http_code}" \
-                          -H "Authorization: Bearer <+secrets.getValue("project.Git-PATS-MAK")>" \
+                          -H 'Authorization: Bearer <+secrets.getValue("project.Git-PATS-MAK")>' \
                           https://api.github.com/repos/mastermak-avyka/<+pipeline.variables.REPO_NAME>/pulls/$PR_NUM/merged)
                         
-                        if [ "$MERGE_CHECK" = "204" ]; then # 👈 FIXED: Swapped == to = for POSIX sh stability
+                        if [ "$MERGE_CHECK" = "204" ]; then
                           echo "Detected successful PR merge action!"
                           IS_MERGED="true"
                           break
@@ -136,9 +139,10 @@ pipeline:
                         FORKS_WAIT=$((FORKS_WAIT+1))
                       done
 
-                      if [ "$IS_MERGED" = "true" ]; then # 👈 FIXED: Swapped == to =
+                      if [ "$IS_MERGED" = "true" ]; then
+                        # 👈 FIXED: Secured global Harness API registration token with single quotes
                         curl -X POST \
-                          -H "X-API-Key: <+secrets.getValue("project.mak_harness_api_token")>" \
+                          -H 'X-API-Key: <+secrets.getValue("project.mak_harness_api_token")>' \
                           -H "Content-Type: application/json" \
                           https://app.harness.io/idp/api/catalog/locations \
                           -d '{"type":"url","target":"https://github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>/blob/main/catalog-info.yaml"}'
@@ -156,9 +160,10 @@ pipeline:
                     shell: Sh
                     command: |-
                       apk add --no-cache curl
+                      # 👈 FIXED: Protected Slack webhook parameter destination path
                       curl -X POST -H 'Content-type: application/json' \
                         --data '{"text":"✅ *Harness IDP Provisioning Update:* The application catalog entry for *<+pipeline.variables.APP_NAME>* has passed all automated staging validation loops and is now live inside the Software Component Directory."}' \
-                        <+secrets.getValue("project.slack_webhook_url")>
+                        '<+secrets.getValue("project.slack_webhook_url")>'
   variables:
     - name: APP_NAME
       type: String
