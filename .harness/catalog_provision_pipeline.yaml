@@ -89,6 +89,8 @@ pipeline:
                     image: alpine/git:latest
                     shell: Sh
                     command: |-
+                      apk add --no-cache bash
+
                       cp catalog-info.yaml target-repo/
                       cd target-repo
 
@@ -98,7 +100,6 @@ pipeline:
                       git add catalog-info.yaml
                       git commit -m "chore: automated idp catalog provisioning structure"
 
-                      # ✅ FIXED: Embed PAT directly in the remote URL - GitHub requires token auth
                       git remote set-url origin https://mastermak-avyka:<+secrets.getValue("project.Git-PATS-MAK")>@github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git
 
                       git push origin <+pipeline.variables.REPO_BRANCH>
