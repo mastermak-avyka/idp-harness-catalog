@@ -53,6 +53,21 @@ pipeline:
 
                       echo "=== Step 2: Configure git ==="
                       export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
+
+                      # Trim any accidental whitespace/newlines from the secret
+                      GITHUB_TOKEN=$(echo -n "$GITHUB_TOKEN" | tr -d '\n\r')
+
+                      if [ -z "$GITHUB_TOKEN" ]; then
+                        echo "ERROR: GITHUB_TOKEN is empty. Check the Harness secret 'project.Git-PATS-MAK'."
+                        exit 1
+                      fi
+
+                      # Install jq for URL encoding (not present in alpine/git by default)
+                      apk add --no-cache jq >/dev/null 2>&1 || true
+
+                      # URL-encode the token so special characters do not break the HTTPS URL
+                      ENCODED_TOKEN=$(printf '%s' "$GITHUB_TOKEN" | jq -sRr @uri 2>/dev/null || printf '%s' "$GITHUB_TOKEN")
+
                       git config --global user.email "attaullah.n.khan@avyka.com"
                       git config --global user.name "mastermak-avyka"
 
@@ -87,8 +102,8 @@ pipeline:
 
                         # Set origin URL with PAT for this push only.
                         # GitHub deprecated password auth; the PAT must be placed
-                        # in the URL username field.
-                        git remote set-url origin "https://${GITHUB_TOKEN}@github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git"
+                        # in the URL username field, URL-encoded.
+                        git remote set-url origin "https://${ENCODED_TOKEN}@github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git"
                         git push origin "$BRANCH"
 
                         # Restore clean public URL after push
