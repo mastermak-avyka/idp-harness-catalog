@@ -51,11 +51,8 @@ pipeline:
                       EOF
                       echo "Successfully generated /harness/catalog-info.yaml"
 
-                      echo "=== Step 2: Configure git credentials ==="
+                      echo "=== Step 2: Configure git ==="
                       export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
-                      git config --global credential.helper store
-                      printf 'https://mastermak-avyka:%s@github.com\n' "$GITHUB_TOKEN" > ~/.git-credentials
-                      chmod 600 ~/.git-credentials
                       git config --global user.email "attaullah.n.khan@avyka.com"
                       git config --global user.name "mastermak-avyka"
 
@@ -87,7 +84,15 @@ pipeline:
                         echo "No changes to commit. Catalog file is already up to date."
                       else
                         git commit -m "chore: automated idp catalog provisioning for <+pipeline.variables.APP_NAME>"
+
+                        # Set origin URL with PAT for this push only.
+                        # GitHub deprecated password auth; the PAT must be placed
+                        # in the URL username field.
+                        git remote set-url origin "https://${GITHUB_TOKEN}@github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git"
                         git push origin "$BRANCH"
+
+                        # Restore clean public URL after push
+                        git remote set-url origin "https://github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git"
                         echo "Successfully pushed catalog-info.yaml to branch '$BRANCH'"
                       fi
               - step:
