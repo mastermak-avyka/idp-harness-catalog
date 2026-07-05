@@ -21,14 +21,17 @@ pipeline:
             steps:
               - step:
                   type: Run
-                  name: Create Catalog Entry
-                  identifier: Create_Catalog_Entry
+                  name: Generate and Push Catalog File
+                  identifier: Generate_and_Push_Catalog_File
                   spec:
                     connectorRef: account.harnessImage
-                    image: alpine:latest
+                    image: alpine/git:latest
                     shell: Sh
                     command: |-
-                      cat <<EOF > catalog-info.yaml
+                      set -euo pipefail
+
+                      echo "=== Step 1: Generate catalog-info.yaml ==="
+                      cat <<EOF > /harness/catalog-info.yaml
                       apiVersion: harness.io/v1
                       kind: Component
                       type: service
@@ -46,122 +49,181 @@ pipeline:
                         annotations:
                           backstage.io/v1alpha1/launch-template: template:default/provision-new-catalog
                       EOF
-                      echo "Successfully generated local catalog-info.yaml"
-              - step:
-                  type: Run
-                  name: Create Branch Path
-                  identifier: Create_Branch_Path
-                  spec:
-                    connectorRef: account.harnessImage
-                    image: alpine/git:latest
-                    shell: Sh
-                    command: |-
-                      # 🔒 Shield token inside single quotes to protect from shell expansion
-                      export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
+                      echo "Successfully generated /harness/catalog-info.yaml"
 
-                      # ⚙️ Activate native Git credential store to bypass URL parsing bugs completely
+                      echo "=== Step 2: Configure git credentials ==="
+                      export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
                       git config --global credential.helper store
                       printf 'https://mastermak-avyka:%s@github.com\n' "$GITHUB_TOKEN" > ~/.git-credentials
                       chmod 600 ~/.git-credentials
-
-                      # Pristine clean URL target path
-                      git clone https://github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git target-repo
-                      cd target-repo
-
                       git config --global user.email "attaullah.n.khan@avyka.com"
                       git config --global user.name "mastermak-avyka"
 
-                      if git ls-remote --heads origin <+pipeline.variables.REPO_BRANCH> | grep -q <+pipeline.variables.REPO_BRANCH>; then
-                          echo "Branch exists. Checking out..."
-                          git checkout <+pipeline.variables.REPO_BRANCH>
+                      echo "=== Step 3: Clone repository ==="
+                      REPO_URL="https://github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>.git"
+                      TARGET_DIR="/harness/target-repo"
+
+                      rm -rf "$TARGET_DIR"
+                      git clone "$REPO_URL" "$TARGET_DIR"
+                      cd "$TARGET_DIR"
+
+                      echo "=== Step 4: Create or checkout branch ==="
+                      BRANCH="<+pipeline.variables.REPO_BRANCH>"
+                      if git ls-remote --heads origin "$BRANCH" | grep -q "$BRANCH"; then
+                        echo "Branch '$BRANCH' exists on remote. Checking out..."
+                        git fetch origin "$BRANCH"
+                        git checkout "$BRANCH"
                       else
-                          echo "Branch does not exist. Cutting fresh..."
-                          git checkout -b <+pipeline.variables.REPO_BRANCH>
+                        echo "Branch '$BRANCH' does not exist. Creating fresh branch..."
+                        git checkout -b "$BRANCH"
+                      fi
+
+                      echo "=== Step 5: Copy catalog file ==="
+                      cp /harness/catalog-info.yaml "$TARGET_DIR/catalog-info.yaml"
+
+                      echo "=== Step 6: Commit and push ==="
+                      git add catalog-info.yaml
+                      if git diff --cached --quiet; then
+                        echo "No changes to commit. Catalog file is already up to date."
+                      else
+                        git commit -m "chore: automated idp catalog provisioning for <+pipeline.variables.APP_NAME>"
+                        git push origin "$BRANCH"
+                        echo "Successfully pushed catalog-info.yaml to branch '$BRANCH'"
                       fi
               - step:
                   type: Run
-                  name: Direct Push File
-                  identifier: Direct_Push_File
-                  spec:
-                    connectorRef: account.harnessImage
-                    image: alpine/git:latest
-                    shell: Sh
-                    command: |-
-                      cp catalog-info.yaml target-repo/
-                      cd target-repo
-
-                      git config user.email "attaullah.n.khan@avyka.com"
-                      git config user.name "mastermak-avyka"
-
-                      git add catalog-info.yaml
-                      git commit -m "chore: automated idp catalog provisioning structure"
-
-                      # 🔒 Re-mount the secure native credential store context inside this step's container
-                      export GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
-                      git config credential.helper store
-                      printf 'https://mastermak-avyka:%s@github.com\n' "$GITHUB_TOKEN" > ~/.git-credentials
-                      chmod 600 ~/.git-credentials
-
-                      git push origin <+pipeline.variables.REPO_BRANCH>
-              - step:
-                  type: Run
-                  name: Generate Pull Request
-                  identifier: Generate_Pull_Request
+                  name: Create Pull Request
+                  identifier: Create_Pull_Request
                   spec:
                     connectorRef: account.harnessImage
                     image: alpine:latest
                     shell: Sh
                     command: |-
+                      set -euo pipefail
+
                       apk add --no-cache curl jq
-                      PR_RESPONSE=$(curl -s -X POST \
-                        -H 'Authorization: Bearer <+secrets.getValue("project.Git-PATS-MAK")>' \
-                        -H "Accept: application/vnd.github+json" \
-                        https://api.github.com/repos/mastermak-avyka/<+pipeline.variables.REPO_NAME>/pulls \
-                        -d '{"title":"IDP Provisioning Request: <+pipeline.variables.APP_NAME>","head":"<+pipeline.variables.REPO_BRANCH>","base":"main","body":"Automated compliance file submission."}')
 
-                      PR_NUMBER=$(echo $PR_RESPONSE | jq '.number')
-                      echo "SUCCESS: Opened active Pull Request #$PR_NUMBER"
-                      echo $PR_NUMBER > pr_tracking.txt
+                      GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
+                      REPO_NAME='<+pipeline.variables.REPO_NAME>'
+                      BRANCH='<+pipeline.variables.REPO_BRANCH>'
+                      APP_NAME='<+pipeline.variables.APP_NAME>'
+
+                      echo "=== Check for existing open PR ==="
+                      EXISTING_PR=$(curl -s -X GET \
+                        -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                        -H "Accept: application/vnd.github+json" \
+                        "https://api.github.com/repos/mastermak-avyka/${REPO_NAME}/pulls?head=mastermak-avyka:${BRANCH}&state=open" | jq '.[0].number // empty')
+
+                      if [ -n "$EXISTING_PR" ]; then
+                        echo "An open PR already exists: PR #${EXISTING_PR}"
+                        echo "$EXISTING_PR" > /harness/pr_tracking.txt
+                        exit 0
+                      fi
+
+                      echo "=== Create new Pull Request ==="
+                      PR_RESPONSE=$(curl -s -X POST \
+                        -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                        -H "Accept: application/vnd.github+json" \
+                        "https://api.github.com/repos/mastermak-avyka/${REPO_NAME}/pulls" \
+                        -d "{\"title\":\"IDP Provisioning Request: ${APP_NAME}\",\"head\":\"${BRANCH}\",\"base\":\"main\",\"body\":\"Automated catalog-info.yaml submission for ${APP_NAME}.\"}")
+
+                      echo "PR_RESPONSE: $PR_RESPONSE"
+
+                      PR_NUMBER=$(echo "$PR_RESPONSE" | jq -r '.number // empty')
+                      PR_HTML_URL=$(echo "$PR_RESPONSE" | jq -r '.html_url // empty')
+
+                      if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
+                        echo "ERROR: Failed to create Pull Request"
+                        echo "$PR_RESPONSE" | jq -r '.message // "Unknown error"'
+                        exit 1
+                      fi
+
+                      echo "SUCCESS: Opened Pull Request #${PR_NUMBER}"
+                      echo "PR_URL: ${PR_HTML_URL}"
+                      echo "$PR_NUMBER" > /harness/pr_tracking.txt
               - step:
                   type: Run
-                  name: Register Catalog In IDP
-                  identifier: Register_Catalog_In_IDP
+                  name: Wait for Merge and Register Catalog
+                  identifier: Wait_for_Merge_and_Register_Catalog
                   spec:
                     connectorRef: account.harnessImage
                     image: alpine:latest
                     shell: Sh
                     command: |-
-                      apk add --no-cache curl
-                      PR_NUM=$(cat pr_tracking.txt)
-                      echo "Tracking status loop for Pull Request #$PR_NUM"
+                      set -euo pipefail
 
-                      FORKS_WAIT=0
+                      apk add --no-cache curl jq
+
+                      GITHUB_TOKEN='<+secrets.getValue("project.Git-PATS-MAK")>'
+                      HARNESS_API_TOKEN='<+secrets.getValue("project.mak_harness_api_token")>'
+                      REPO_NAME='<+pipeline.variables.REPO_NAME>'
+                      APP_NAME='<+pipeline.variables.APP_NAME>'
+
+                      if [ ! -f /harness/pr_tracking.txt ]; then
+                        echo "ERROR: pr_tracking.txt not found. Cannot wait for merge."
+                        exit 1
+                      fi
+
+                      PR_NUM=$(cat /harness/pr_tracking.txt)
+                      echo "Tracking Pull Request #${PR_NUM}"
+
+                      MAX_WAIT=60
+                      WAIT_COUNT=0
                       IS_MERGED="false"
-                      while [ $FORKS_WAIT -lt 18 ]; do
-                        MERGE_CHECK=$(curl -s -o /dev/null -w "%{http_code}" \
-                          -H 'Authorization: Bearer <+secrets.getValue("project.Git-PATS-MAK")>' \
-                          https://api.github.com/repos/mastermak-avyka/<+pipeline.variables.REPO_NAME>/pulls/$PR_NUM/merged)
-                        
-                        if [ "$MERGE_CHECK" = "204" ]; then
-                          echo "Detected successful PR merge action!"
+
+                      while [ $WAIT_COUNT -lt $MAX_WAIT ]; do
+                        MERGE_STATUS=$(curl -s -o /tmp/merge_response.txt -w "%{http_code}" \
+                          -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                          "https://api.github.com/repos/mastermak-avyka/${REPO_NAME}/pulls/${PR_NUM}")
+
+                        if [ "$MERGE_STATUS" = "200" ]; then
+                          MERGED=$(cat /tmp/merge_response.txt | jq -r '.merged // false')
+                          STATE=$(cat /tmp/merge_response.txt | jq -r '.state // "unknown"')
+
+                          if [ "$MERGED" = "true" ]; then
+                            echo "PR #${PR_NUM} has been merged."
+                            IS_MERGED="true"
+                            break
+                          fi
+
+                          if [ "$STATE" = "closed" ] && [ "$MERGED" != "true" ]; then
+                            echo "PR #${PR_NUM} was closed without merging. Skipping catalog registration."
+                            exit 0
+                          fi
+                        elif [ "$MERGE_STATUS" = "404" ]; then
+                          echo "PR #${PR_NUM} not found. It may have been merged and deleted."
                           IS_MERGED="true"
                           break
                         fi
-                        echo "PR open. Waiting for merge... (10s check interval)"
+
+                        echo "PR #${PR_NUM} not merged yet. Waiting... (10s interval, ${WAIT_COUNT}/${MAX_WAIT})"
                         sleep 10
-                        FORKS_WAIT=$((FORKS_WAIT+1))
+                        WAIT_COUNT=$((WAIT_COUNT + 1))
                       done
 
-                      if [ "$IS_MERGED" = "true" ]; then
-                        curl -X POST \
-                          -H 'X-API-Key: <+secrets.getValue("project.mak_harness_api_token")>' \
-                          -H "Content-Type: application/json" \
-                          https://app.harness.io/idp/api/catalog/locations \
-                          -d '{"type":"url","target":"https://github.com/mastermak-avyka/<+pipeline.variables.REPO_NAME>/blob/main/catalog-info.yaml"}'
-                      else
-                        echo "SKIPPED: PR not merged."
+                      if [ "$IS_MERGED" != "true" ]; then
+                        echo "WARNING: PR #${PR_NUM} was not merged within the timeout period. Skipping catalog registration."
                         exit 0
                       fi
+
+                      echo "=== Register catalog location in Harness IDP ==="
+                      CATALOG_URL="https://github.com/mastermak-avyka/${REPO_NAME}/blob/main/catalog-info.yaml"
+
+                      IDP_RESPONSE=$(curl -s -o /tmp/idp_response.txt -w "%{http_code}" -X POST \
+                        -H "X-API-Key: ${HARNESS_API_TOKEN}" \
+                        -H "Content-Type: application/json" \
+                        "https://app.harness.io/idp/api/catalog/locations" \
+                        -d "{\"type\":\"url\",\"target\":\"${CATALOG_URL}\"}")
+
+                      echo "IDP registration response code: ${IDP_RESPONSE}"
+                      cat /tmp/idp_response.txt
+
+                      if [ "$IDP_RESPONSE" != "200" ] && [ "$IDP_RESPONSE" != "201" ] && [ "$IDP_RESPONSE" != "202" ]; then
+                        echo "ERROR: Failed to register catalog location in Harness IDP."
+                        exit 1
+                      fi
+
+                      echo "SUCCESS: Catalog location registered in Harness IDP."
               - step:
                   type: Run
                   name: Slack Registration Notify
@@ -171,24 +233,37 @@ pipeline:
                     image: alpine:latest
                     shell: Sh
                     command: |-
+                      set -euo pipefail
+
                       apk add --no-cache curl
+
+                      APP_NAME='<+pipeline.variables.APP_NAME>'
+                      REPO_NAME='<+pipeline.variables.REPO_NAME>'
+
+                      PR_NUM=""
+                      if [ -f /harness/pr_tracking.txt ]; then
+                        PR_NUM=$(cat /harness/pr_tracking.txt)
+                      fi
+
+                      PR_URL="https://github.com/mastermak-avyka/${REPO_NAME}/pull/${PR_NUM}"
+
                       curl -X POST -H 'Content-type: application/json' \
-                        --data '{"text":"✅ *Harness IDP Provisioning Update:* The application catalog entry for *<+pipeline.variables.APP_NAME>* has passed all automated staging validation loops and is now live inside the Software Component Directory."}' \
+                        --data "{\"text\":\"✅ *Harness IDP Provisioning Update:* The application catalog entry for *${APP_NAME}* has been processed. PR: ${PR_URL}\"}" \
                         '<+secrets.getValue("project.slack_webhook_url")>'
   variables:
     - name: APP_NAME
       type: String
-      required: false
+      required: true
       value: <+input>
     - name: APP_DESCRIPTION
       type: String
-      required: false
+      required: true
       value: <+input>
     - name: REPO_NAME
       type: String
-      required: false
+      required: true
       value: <+input>
     - name: REPO_BRANCH
       type: String
-      required: false
+      required: true
       value: <+input>
